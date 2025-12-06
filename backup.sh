@@ -1,5 +1,47 @@
 #!/bin/bash
 cd /home/kimji/auto-backup
+
+# -------------------------------------
+# 최근 백업 로그 5개 출력
+# -------------------------------------
+if [[ "$1" == "recent" ]]; then
+    echo "📌 최근 백업 로그 5개"
+    echo "----------------------------------"
+
+    # START 라인 번호 추출
+    mapfile -t STARTS < <(grep -n "\=\=\=\= AUTO BACKUP START \=\=\=\=" "$LOG_FILE" | awk -F: '{print $1}')
+
+    TOTAL=${#STARTS[@]}
+
+    if (( TOTAL == 0 )); then
+        echo "⚠ 기록된 백업 로그가 없습니다."
+        exit 0
+    fi
+
+    # 최근 5개의 시작점만 사용
+    COUNT=$(( TOTAL < 5 ? TOTAL : 5 ))
+
+    echo "총 ${TOTAL}개의 백업 중 최근 ${COUNT}개를 출력합니다."
+    echo ""
+
+    for (( i=0; i<COUNT; i++ ))
+    do
+        INDEX=$(( TOTAL - i - 1 ))
+        START_LINE=${STARTS[$INDEX]}
+
+        # END 찾기
+        END_LINE=$(sed -n "${START_LINE},\$p" "$LOG_FILE" | grep -n "AUTO BACKUP END" | head -n 1 | awk -F: '{print $1}')
+        END_LINE=$(( START_LINE + END_LINE - 1 ))
+
+        echo "===== #$((i+1)) 번째 백업 기록 ====="
+        sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE"
+        echo ""
+    done
+
+    exit 0
+fi
+
+
 # --- 필수 폴더 자동 생성 ---
 REQUIRED_DIRS=("logs" "reports" "scripts" "notes")
 
