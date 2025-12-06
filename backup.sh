@@ -11,35 +11,43 @@ show_recent() {
 
     LOG_FILE="logs/backup.log"
 
-    if [ ! -f "$LOG_FILE" ]; then
-        echo "⚠ 백업 로그 파일이 존재하지 않습니다."
-        exit 0
-    fi
-
-    # START 지점 찾기
+    # START / END 라인 번호 수집
     mapfile -t STARTS < <(grep -n "AUTO *BACKUP *START" "$LOG_FILE" | awk -F: '{print $1}')
-    # END 지점 찾기
-    mapfile -t ENDS < <(grep -n "AUTO *BACKUP *END" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS   < <(grep -n "AUTO *BACKUP *END" "$LOG_FILE"   | awk -F: '{print $1}')
 
     if [ ${#STARTS[@]} -eq 0 ]; then
         echo "⚠ 기록된 백업 로그가 없습니다."
-        exit 0
+        return
     fi
 
     COUNT=${#STARTS[@]}
     echo "총 $COUNT개의 백업 중 최근 5개를 출력합니다."
     echo ""
 
-    # 최근 5개만 출력
+    # 최근 5개 START 기준으로 반복
     for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
         S=${STARTS[$i]}
-        E=${ENDS[$i]}
+
+        # S보다 크면서 가장 가까운 END 찾기
+        E=0
+        for end_line in "${ENDS[@]}"; do
+            if (( end_line > S )); then
+                E=$end_line
+                break
+            fi
+        done
+
+        # END가 없으면 로그 끝까지 출력
+        if [ "$E" -eq 0 ]; then
+            E=$(wc -l < "$LOG_FILE")
+        fi
 
         echo "===== #$((i+1)) 번째 백업 기록 ====="
         sed -n "${S},${E}p" "$LOG_FILE"
         echo ""
     done
 }
+
 
 ############################################
 #          명령 모드 처리 (함수 아래에 위치)
