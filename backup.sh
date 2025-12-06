@@ -1,5 +1,5 @@
 #!/bin/bash
-
+cd /home/kimji/auto-backup
 # --- 필수 폴더 자동 생성 ---
 REQUIRED_DIRS=("logs" "reports" "scripts" "notes")
 
