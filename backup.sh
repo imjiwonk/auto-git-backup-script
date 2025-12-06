@@ -1,45 +1,39 @@
 #!/bin/bash
 cd /home/kimji/auto-backup
 
-# -------------------------------------
-# 최근 백업 로그 5개 출력
-# -------------------------------------
-if [[ "$1" == "recent" ]]; then
+show_recent() {
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    # START 라인 번호 추출
-    mapfile -t STARTS < <(grep -n "\=\=\=\= AUTO BACKUP START \=\=\=\=" "$LOG_FILE" | awk -F: '{print $1}')
+    LOG_FILE="logs/backup.log"
 
-    TOTAL=${#STARTS[@]}
+    # START 지점 찾기 (공백 무시)
+    mapfile -t STARTS < <(grep -n "AUTO *BACKUP *START" "$LOG_FILE" | awk -F: '{print $1}')
 
-    if (( TOTAL == 0 )); then
+    # END 지점 찾기
+    mapfile -t ENDS < <(grep -n "AUTO *BACKUP *END" "$LOG_FILE" | awk -F: '{print $1}')
+
+    if [ ${#STARTS[@]} -eq 0 ]; then
         echo "⚠ 기록된 백업 로그가 없습니다."
-        exit 0
+        return
     fi
 
-    # 최근 5개의 시작점만 사용
-    COUNT=$(( TOTAL < 5 ? TOTAL : 5 ))
+    COUNT=${#STARTS[@]}
 
-    echo "총 ${TOTAL}개의 백업 중 최근 ${COUNT}개를 출력합니다."
+    echo "총 $COUNT개의 백업 중 최근 5개를 출력합니다."
     echo ""
 
-    for (( i=0; i<COUNT; i++ ))
-    do
-        INDEX=$(( TOTAL - i - 1 ))
-        START_LINE=${STARTS[$INDEX]}
-
-        # END 찾기
-        END_LINE=$(sed -n "${START_LINE},\$p" "$LOG_FILE" | grep -n "AUTO BACKUP END" | head -n 1 | awk -F: '{print $1}')
-        END_LINE=$(( START_LINE + END_LINE - 1 ))
+    # 최근 5개만 출력
+    for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
+        S=${STARTS[$i]}
+        E=${ENDS[$i]}
 
         echo "===== #$((i+1)) 번째 백업 기록 ====="
-        sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE"
+        sed -n "${S},${E}p" "$LOG_FILE"
         echo ""
     done
+}
 
-    exit 0
-fi
 
 
 # --- 필수 폴더 자동 생성 ---
