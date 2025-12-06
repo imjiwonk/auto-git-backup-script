@@ -6,47 +6,85 @@ cd /home/kimji/auto-backup
 ############################################
 
 show_recent() {
-    echo "📌 최근 백업 로그 5개"
-    echo "----------------------------------"
-
     LOG_FILE="logs/backup.log"
 
-    # START / END 라인 번호 수집
-    mapfile -t STARTS < <(grep -n "AUTO *BACKUP *START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS   < <(grep -n "AUTO *BACKUP *END" "$LOG_FILE"   | awk -F: '{print $1}')
+    echo " "
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📌  최근 실제 백업(Commit 발생) 로그 5개"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo " "
 
-    if [ ${#STARTS[@]} -eq 0 ]; then
-        echo "⚠ 기록된 백업 로그가 없습니다."
+    # START 위치 수집
+    mapfile -t STARTS < <(grep -n "AUTO *BACKUP *START" "$LOG_FILE" | awk -F: '{print $1}')
+    TOTAL_LINES=$(wc -l < "$LOG_FILE")
+
+    committed_blocks=()
+
+    # 각 블록 탐색하며 commit 여부 확인
+    for ((i=0; i<${#STARTS[@]}; i++)); do
+        S=${STARTS[$i]}
+
+        # 블록 범위 계산
+        if (( i + 1 < ${#STARTS[@]} )); then
+            E=$((STARTS[$((i+1))] - 1))
+        else
+            E=$TOTAL_LINES
+        fi
+
+        BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
+
+        # Commit 있는 로그만 저장
+        if echo "$BLOCK" | grep -q "Commit 완료"; then
+            committed_blocks+=("$S,$E")
+        fi
+    done
+
+    COUNT=${#committed_blocks[@]}
+
+    if [ $COUNT -eq 0 ]; then
+        echo "⚠ Commit 기록이 없습니다."
         return
     fi
 
-    COUNT=${#STARTS[@]}
-    echo "총 $COUNT개의 백업 중 최근 5개를 출력합니다."
-    echo ""
+    echo "총 $COUNT개의 Commit 백업 중 최근 5개 출력"
+    echo " "
 
-    # 최근 5개 START 기준으로 반복
+    # 최근 5개의 commit 블록 출력
     for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
-        S=${STARTS[$i]}
+        block="${committed_blocks[$i]}"
+        S=$(echo "$block" | cut -d',' -f1)
+        E=$(echo "$block" | cut -d',' -f2)
 
-        # S보다 크면서 가장 가까운 END 찾기
-        E=0
-        for end_line in "${ENDS[@]}"; do
-            if (( end_line > S )); then
-                E=$end_line
-                break
-            fi
-        done
+        BLOCK_CONTENT=$(sed -n "${S},${E}p" "$LOG_FILE")
 
-        # END가 없으면 로그 끝까지 출력
-        if [ "$E" -eq 0 ]; then
-            E=$(wc -l < "$LOG_FILE")
-        fi
+        # 날짜 추출
+        DATE=$(echo "$BLOCK_CONTENT" | head -1 | grep -oP '\[\K[0-9:\- ]+(?=\])')
 
-        echo "===== #$((i+1)) 번째 백업 기록 ====="
-        sed -n "${S},${E}p" "$LOG_FILE"
-        echo ""
+        # Commit ID 추출
+        COMMIT=$(echo "$BLOCK_CONTENT" | grep -oP "\[main \K[0-9a-f]+")
+
+        # 변경 파일 요약
+        CHANGES=$(echo "$BLOCK_CONTENT" | grep -oP "[0-9]+ insertions|\b[0-9]+ deletions" | paste -sd ", " -)
+
+        # Report 파일명
+        REPORT=$(echo "$BLOCK_CONTENT" | grep -oP "reports/[0-9\-_]+\.txt")
+
+        # Push 상태
+        PUSH=$(echo "$BLOCK_CONTENT" | grep "Push 성공" >/dev/null && echo "성공" || echo "실패")
+
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📦  백업 #$((i+1))   ($DATE)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✔ Commit ID : ${COMMIT:-알 수 없음}"
+        echo "✔ 변경 사항 : ${CHANGES:-변경 정보 없음}"
+        echo "✔ Report    : ${REPORT:-없음}"
+        echo "✔ Push 결과 : $PUSH"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo " "
     done
 }
+
+
 
 
 ############################################
