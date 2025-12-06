@@ -1,107 +1,67 @@
 #!/bin/bash
 cd /home/kimji/auto-backup
 
-############################################
-#            함수 선언부 (먼저 필요)
-############################################
+# ===============================
+#  Slack 알림 함수 (환경 변수 사용)
+# ===============================
+WEBHOOK_URL="$SLACK_WEBHOOK_URL"
 
-show_recent() {
-    LOG_FILE="logs/backup.log"
+notify_slack() {
+    MESSAGE="$1"
 
-    echo " "
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "📌  최근 실제 백업(Commit 발생) 로그 5개"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo " "
-
-    # START 위치 수집
-    mapfile -t STARTS < <(grep -n "AUTO *BACKUP *START" "$LOG_FILE" | awk -F: '{print $1}')
-    TOTAL_LINES=$(wc -l < "$LOG_FILE")
-
-    committed_blocks=()
-
-    # 각 블록 탐색하며 commit 여부 확인
-    for ((i=0; i<${#STARTS[@]}; i++)); do
-        S=${STARTS[$i]}
-
-        # 블록 범위 계산
-        if (( i + 1 < ${#STARTS[@]} )); then
-            E=$((STARTS[$((i+1))] - 1))
-        else
-            E=$TOTAL_LINES
-        fi
-
-        BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
-
-        # Commit 있는 로그만 저장
-        if echo "$BLOCK" | grep -q "Commit 완료"; then
-            committed_blocks+=("$S,$E")
-        fi
-    done
-
-    COUNT=${#committed_blocks[@]}
-
-    if [ $COUNT -eq 0 ]; then
-        echo "⚠ Commit 기록이 없습니다."
+    # Webhook URL이 설정되지 않은 경우 알림 건너뜀
+    if [ -z "$WEBHOOK_URL" ]; then
         return
     fi
 
-    echo "총 $COUNT개의 Commit 백업 중 최근 5개 출력"
-    echo " "
+    curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\": \"$MESSAGE\"}" \
+        "$WEBHOOK_URL" > /dev/null 2>&1
+}
 
-    # 최근 5개의 commit 블록 출력
+# ===============================
+#  최근 백업 로그 출력 기능
+# ===============================
+show_recent() {
+    echo "📌 최근 백업 로그 5개"
+    echo "----------------------------------"
+
+    LOG_FILE="logs/backup.log"
+
+    # START / END 라인 찾기
+    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
+
+    if [ ${#STARTS[@]} -eq 0 ]; then
+        echo "⚠ 기록된 백업 로그가 없습니다."
+        exit 0
+    fi
+
+    COUNT=${#STARTS[@]}
+    echo "총 $COUNT개의 백업 중 최근 5개를 출력합니다."
+    echo ""
+
     for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
-        block="${committed_blocks[$i]}"
-        S=$(echo "$block" | cut -d',' -f1)
-        E=$(echo "$block" | cut -d',' -f2)
+        S=${STARTS[$i]}
+        E=${ENDS[$i]}
 
-        BLOCK_CONTENT=$(sed -n "${S},${E}p" "$LOG_FILE")
-
-        # 날짜 추출
-        DATE=$(echo "$BLOCK_CONTENT" | head -1 | grep -oP '\[\K[0-9:\- ]+(?=\])')
-
-        # Commit ID 추출
-        COMMIT=$(echo "$BLOCK_CONTENT" | grep -oP "\[main \K[0-9a-f]+")
-
-        # 변경 파일 요약
-        CHANGES=$(echo "$BLOCK_CONTENT" | grep -oP "[0-9]+ insertions|\b[0-9]+ deletions" | paste -sd ", " -)
-
-        # Report 파일명
-        REPORT=$(echo "$BLOCK_CONTENT" | grep -oP "reports/[0-9\-_]+\.txt")
-
-        # Push 상태
-        PUSH=$(echo "$BLOCK_CONTENT" | grep "Push 성공" >/dev/null && echo "성공" || echo "실패")
-
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "📦  백업 #$((i+1))   ($DATE)"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "✔ Commit ID : ${COMMIT:-알 수 없음}"
-        echo "✔ 변경 사항 : ${CHANGES:-변경 정보 없음}"
-        echo "✔ Report    : ${REPORT:-없음}"
-        echo "✔ Push 결과 : $PUSH"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo " "
+        echo "===== #$((i+1)) 번째 백업 기록 ====="
+        sed -n "${S},${E}p" "$LOG_FILE"
+        echo ""
     done
 }
 
-
-
-
-############################################
-#          명령 모드 처리 (함수 아래에 위치)
-############################################
-
+# 명령 처리: 최근 로그
 if [ "$1" = "recent" ]; then
     show_recent
     exit 0
 fi
 
-############################################
-#           백업 기능 시작
-############################################
-
-# 필수 폴더 생성
+# ===============================
+# 필수 폴더 자동 생성
+# ===============================
 REQUIRED_DIRS=("logs" "reports" "scripts" "notes")
+
 for DIR in "${REQUIRED_DIRS[@]}"; do
     if [ ! -d "$DIR" ]; then
         mkdir -p "$DIR"
@@ -109,47 +69,63 @@ for DIR in "${REQUIRED_DIRS[@]}"; do
     fi
 done
 
-LOG_DIR="logs"
-LOG_FILE="$LOG_DIR/backup.log"
+LOG_FILE="logs/backup.log"
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
 echo "[$TIMESTAMP] ==== AUTO BACKUP START ====" >> "$LOG_FILE"
 
-# 변경사항 체크
+# ===============================
+#  Git 변경사항 확인
+# ===============================
 STATUS=$(git status --porcelain)
+
 if [ -z "$STATUS" ]; then
     echo "[$TIMESTAMP] 변경 사항 없음. 백업 종료." | tee -a "$LOG_FILE"
     exit 0
 fi
 
-# 변경 로그 생성
-./generate_report.sh
+# ===============================
+#  변경 로그 생성
+# ===============================
+REPORT_PATH=$(./generate_report.sh)
+echo "변경 로그 생성 완료 → $REPORT_PATH"
 
-# Git add → commit
+# ===============================
+#  Commit 처리
+# ===============================
 git add .
 git commit -m "Auto Backup : $TIMESTAMP" >> "$LOG_FILE" 2>&1
+
 if [ $? -ne 0 ]; then
     echo "[$TIMESTAMP] Commit 실패" | tee -a "$LOG_FILE"
+    notify_slack "❌ 자동 백업 실패 — Commit 오류 발생"
     exit 1
 fi
 
 echo "[$TIMESTAMP] Commit 완료" >> "$LOG_FILE"
 
-# pull → 충돌 시 stash 자동 처리
+# ===============================
+#  Pull (충돌 대비)
+# ===============================
 git pull --rebase >> "$LOG_FILE" 2>&1
 if [ $? -ne 0 ]; then
-    echo "[$TIMESTAMP] Pull 충돌 → 자동 stash 적용" | tee -a "$LOG_FILE"
+    echo "[$TIMESTAMP] Pull 충돌 — stash 적용" | tee -a "$LOG_FILE"
     git stash >> "$LOG_FILE"
     git pull --rebase >> "$LOG_FILE"
     git stash pop >> "$LOG_FILE"
 fi
 
-# push
+# ===============================
+#  Push
+# ===============================
 git push >> "$LOG_FILE" 2>&1
+
 if [ $? -eq 0 ]; then
     echo "[$TIMESTAMP] Push 성공" | tee -a "$LOG_FILE"
+    notify_slack "✅ 자동 백업 성공!\n- 시간: $TIMESTAMP\n- 보고서: $REPORT_PATH"
 else
     echo "[$TIMESTAMP] Push 실패" | tee -a "$LOG_FILE"
+    notify_slack "❌ 자동 백업 실패 (Push 오류)"
 fi
 
 echo "[$TIMESTAMP] ==== AUTO BACKUP END ====" >> "$LOG_FILE"
