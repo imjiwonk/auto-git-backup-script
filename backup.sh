@@ -95,28 +95,39 @@ show_recent() {
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
+    LOG_FILE="logs/backup.log"
 
-    if [ ${#STARTS[@]} -eq 0 ]; then
-        echo "⚠ 기록된 백업 로그가 없습니다."
+    # START / END 라인 번호 읽기
+    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END" "$LOG_FILE"   | awk -F: '{print $1}')
+
+    # END 기준으로 안정적인 백업 개수를 정함
+    TOTAL=${#ENDS[@]}
+
+    if [ $TOTAL -eq 0 ]; then
+        echo "⚠ 정상적으로 종료된 백업 기록이 없습니다."
         exit 0
     fi
 
-    COUNT=${#STARTS[@]}
-    echo "총 $COUNT개의 정상적인 백업 중 최근 5개:"
+    echo "총 $TOTAL개의 정상 종료된 백업 중 최근 5개:"
     echo ""
 
-    START_INDEX=$((COUNT > 5 ? COUNT - 5 : 0))
+    # 최근 5개만 선택
+    START_INDEX=$((TOTAL > 5 ? TOTAL - 5 : 0))
 
-    for ((i = START_INDEX; i < COUNT; i++)); do
-        S=${STARTS[$i]}
+    for ((i = START_INDEX; i < TOTAL; i++)); do
         E=${ENDS[$i]}
 
+        # END 라인보다 바로 앞의 START 라인을 찾음
+        S=$(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: -v end="$E" '$1 < end {last=$1} END{print last}')
+
+        # sed 출력
         BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
 
+        # 시간 추출
         DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | tr -d '[]')
 
+        # 상태
         if echo "$BLOCK" | grep -q "Push 성공"; then
             STATUS="성공"
         elif echo "$BLOCK" | grep -q "변경 사항 없음"; then
@@ -125,12 +136,14 @@ show_recent() {
             STATUS="실패"
         fi
 
+        # 변경 파일 개수
         CHANGE=$(echo "$BLOCK" | grep "files changed" | grep -o "[0-9]\+ files changed")
         [[ -z "$CHANGE" ]] && CHANGE="-"
 
         echo "#$((i+1)) | [$DATE] | $STATUS | $CHANGE"
     done
 }
+
 
 # -------------------------------
 # 명령어 처리
