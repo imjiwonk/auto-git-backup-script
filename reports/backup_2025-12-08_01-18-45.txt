@@ -1,0 +1,6 @@
+sending incremental file list
+*deleting   test_1765123971.txt
+.d..t...... ./
+
+sent 106 bytes  received 38 bytes  288.00 bytes/sec
+total size is 140  speedup is 0.97
