@@ -28,14 +28,12 @@ show_recent() {
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    # START 라인의 번호 + 날짜 추출
-    mapfile -t START_LINES < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t START_DATETIMES < <(grep "AUTO BACKUP START" "$LOG_FILE" | awk '{print $1, $2}')
+    # START / END 라인 번호 불러오기
+    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t DATETIMES < <(grep "AUTO BACKUP START" "$LOG_FILE" | awk '{print $1, $2}')
 
-    # END 라인의 번호
-    mapfile -t END_LINES < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
-
-    TOTAL=${#START_LINES[@]}
+    TOTAL=${#STARTS[@]}
 
     if [ $TOTAL -eq 0 ]; then
         echo "⚠ 백업 로그가 없습니다."
@@ -48,32 +46,40 @@ show_recent() {
     COUNT=0
     for ((i = TOTAL - 1; i >= 0 && COUNT < 5; i--)); do
 
-        S=${START_LINES[$i]}
-        E=${END_LINES[$i]}
-        DATE=${START_DATETIMES[$i]}
+        S=${STARTS[$i]}
+        E=${ENDS[$i]}
+        DATE=${DATETIMES[$i]}
 
-        # 성공/실패 여부 판별
-        if sed -n "${S},${E}p" "$LOG_FILE" | grep -q "Push 성공"; then
+        # END가 없으면 START와 동일하게 설정
+        if [ -z "$E" ]; then
+            E=$S
+        fi
+
+        BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
+
+        # 상태 판별
+        if echo "$BLOCK" | grep -q "Push 성공"; then
             STATUS="성공"
-        elif sed -n "${S},${E}p" "$LOG_FILE" | grep -q "변경 사항 없음"; then
+        elif echo "$BLOCK" | grep -q "변경 사항 없음"; then
             STATUS="없음"
         else
             STATUS="실패"
         fi
 
-        # 변경 파일 수 추출
-        CHANGES=$(sed -n "${S},${E}p" "$LOG_FILE" | grep "files changed" | head -n1 | awk '{print $2}')
+        # 변경 파일 수
+        CHANGES=$(echo "$BLOCK" | grep "files changed" | head -n1 | awk '{print $2}')
         if [ -z "$CHANGES" ]; then
             CHANGES="-"
         fi
 
-        echo "#$((i+1)) | $DATE | $STATUS | $CHANGES files changed"
+        echo "#$((i+1)) | [$DATE] | $STATUS | $CHANGES files changed"
 
         COUNT=$((COUNT + 1))
     done
 
     echo ""
 }
+
 
 
 # -------------------------------
