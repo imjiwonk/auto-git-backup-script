@@ -6,73 +6,112 @@ cd /home/kimji/auto-backup
 # ===============================
 WEBHOOK_URL="$SLACK_WEBHOOK_URL"
 
-notify_slack() {
-    MESSAGE="$1"
+notify_slack_success() {
+    TIME="$1"
+    FILES="$2"
+    REPORT="$3"
 
     if [ -z "$WEBHOOK_URL" ]; then
         echo "[INFO] SLACK_WEBHOOK_URL 없음 → Slack 알림 생략"
         return
     fi
 
-    curl -X POST -H 'Content-type: application/json' \
-        --data "{\"text\": \"$MESSAGE\"}" \
-        "$WEBHOOK_URL" > /dev/null 2>&1
+    curl -X POST -H "Content-Type: application/json" \
+        --data "{
+  \"blocks\": [
+    {
+      \"type\": \"header\",
+      \"text\": {
+        \"type\": \"plain_text\",
+        \"text\": \"✅ 자동 백업 성공!\",
+        \"emoji\": true
+      }
+    },
+    {
+      \"type\": \"section\",
+      \"fields\": [
+        {
+          \"type\": \"mrkdwn\",
+          \"text\": \"*🗓 시간:*\n$TIME\"
+        }
+      ]
+    },
+    {
+      \"type\": \"section\",
+      \"text\": {
+        \"type\": \"mrkdwn\",
+        \"text\": \"*📄 변경된 파일 목록:*\n$FILES\"
+      }
+    },
+    {
+      \"type\": \"section\",
+      \"text\": {
+        \"type\": \"mrkdwn\",
+        \"text\": \"📘 *보고서:* $REPORT\"
+      }
+    }
+  ]
+}" \
+    "$WEBHOOK_URL"
+}
+
+notify_slack_fail() {
+    REASON="$1"
+
+    if [ -z "$WEBHOOK_URL" ]; then
+        echo "[INFO] SLACK_WEBHOOK_URL 없음 → Slack 알림 생략"
+        return
+    fi
+
+    curl -X POST -H "Content-Type: application/json" \
+        --data "{
+  \"blocks\": [
+    {
+      \"type\": \"header\",
+      \"text\": {
+        \"type\": \"plain_text\",
+        \"text\": \"❌ 자동 백업 실패!\",
+        \"emoji\": true
+      }
+    },
+    {
+      \"type\": \"section\",
+      \"text\": {
+        \"type\": \"mrkdwn\",
+        \"text\": \"⚠ 실패 사유:\n$REASON\"
+      }
+    }
+  ]
+}" \
+    "$WEBHOOK_URL"
 }
 
 # ===============================
 #  최근 백업 로그 출력 기능
 # ===============================
-show_recent() {
-    LOG_FILE="logs/backup.log"
+LOG_FILE="logs/backup.log"
 
+show_recent() {
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    # START, END 라인 배열
     mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END" "$LOG_FILE"   | awk -F: '{print $1}')
+    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
 
     if [ ${#STARTS[@]} -eq 0 ]; then
-        echo "⚠ 로그가 없습니다."
-        return
+        echo "⚠ 기록된 백업 로그가 없습니다."
+        exit 0
     fi
 
-    # ⭐ 페어링된 블록만 저장할 배열
-    PAIRED_STARTS=()
-    PAIRED_ENDS=()
-
-    si=0
-    ei=0
-
-    # START와 END를 순서대로 매칭
-    while [ $si -lt ${#STARTS[@]} ] && [ $ei -lt ${#ENDS[@]} ]; do
-        if [ "${ENDS[$ei]}" -gt "${STARTS[$si]}" ]; then
-            # 매칭됨
-            PAIRED_STARTS+=("${STARTS[$si]}")
-            PAIRED_ENDS+=("${ENDS[$ei]}")
-            ((si++))
-            ((ei++))
-        else
-            ((ei++))
-        fi
-    done
-
-    TOTAL=${#PAIRED_STARTS[@]}
-
-    if [ $TOTAL -eq 0 ]; then
-        echo "⚠ 매칭된 백업 기록이 없습니다. (END 없는 START가 많음)"
-        return
-    fi
-
-    echo "총 $TOTAL개의 정상적인 백업 중 최근 5개:"
+    COUNT=${#STARTS[@]}
+    echo "총 $COUNT개의 정상적인 백업 중 최근 5개:"
     echo ""
 
-    # 최근 5개만
-    START_INDEX=$(( TOTAL > 5 ? TOTAL - 5 : 0 ))
+    START_INDEX=$((COUNT > 5 ? COUNT - 5 : 0))
 
-    for ((i = START_INDEX; i < TOTAL; i++)); do
-        S=${PAIRED_STARTS[$i]}
-        E=${PAIRED_ENDS[$i]}
+    for ((i = START_INDEX; i < COUNT; i++)); do
+        S=${STARTS[$i]}
+        E=${ENDS[$i]}
 
         BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
 
@@ -91,8 +130,6 @@ show_recent() {
 
         echo "#$((i+1)) | [$DATE] | $STATUS | $CHANGE"
     done
-
-    echo ""
 }
 
 # -------------------------------
@@ -115,7 +152,6 @@ for DIR in "${REQUIRED_DIRS[@]}"; do
     fi
 done
 
-LOG_FILE="logs/backup.log"
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
 echo "[$TIMESTAMP] ==== AUTO BACKUP START ====" >> "$LOG_FILE"
@@ -146,6 +182,8 @@ while read -r FILE; do
     FILE_LIST="$FILE_LIST\n- $FILE"
 done <<< "$CHANGED_FILES"
 
+FILE_LIST_SLACK=$(echo -e "$FILE_LIST")
+
 # ===============================
 #  Commit 처리
 # ===============================
@@ -154,7 +192,7 @@ git commit -m "Auto Backup : $TIMESTAMP" >> "$LOG_FILE" 2>&1
 
 if [ $? -ne 0 ]; then
     echo "[$TIMESTAMP] Commit 실패" | tee -a "$LOG_FILE"
-    notify_slack "❌ 자동 백업 실패 — Commit 오류 발생"
+    notify_slack_fail "Commit 오류 발생"
     exit 1
 fi
 
@@ -178,13 +216,10 @@ git push >> "$LOG_FILE" 2>&1
 
 if [ $? -eq 0 ]; then
     echo "[$TIMESTAMP] Push 성공" | tee -a "$LOG_FILE"
-    notify_slack "✅ *자동 백업 성공!*
-📅 시간: $TIMESTAMP
-📄 변경된 파일 목록:$FILE_LIST
-📘 보고서: $REPORT_PATH"
+    notify_slack_success "$TIMESTAMP" "$FILE_LIST_SLACK" "$REPORT_PATH"
 else
     echo "[$TIMESTAMP] Push 실패" | tee -a "$LOG_FILE"
-    notify_slack "❌ 자동 백업 실패 (Push 오류)"
+    notify_slack_fail "Push 오류"
 fi
 
 echo "[$TIMESTAMP] ==== AUTO BACKUP END ====" >> "$LOG_FILE"
