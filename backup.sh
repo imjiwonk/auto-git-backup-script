@@ -23,55 +23,56 @@ notify_slack() {
 #  최근 백업 로그 출력 기능
 # ===============================
 show_recent() {
+    LOG_FILE="logs/backup.log"
+
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    LOG_FILE="logs/backup.log"
+    # START 라인의 번호 + 날짜 추출
+    mapfile -t START_LINES < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t START_DATETIMES < <(grep "AUTO BACKUP START" "$LOG_FILE" | awk '{print $1, $2}')
 
-    # START, END 라인 번호 읽기
-    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END" "$LOG_FILE"   | awk -F: '{print $1}')
+    # END 라인의 번호
+    mapfile -t END_LINES < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
 
-    if [ ${#STARTS[@]} -eq 0 ] || [ ${#ENDS[@]} -eq 0 ]; then
-        echo "⚠ 기록된 백업 로그가 없습니다."
-        exit 0
+    TOTAL=${#START_LINES[@]}
+
+    if [ $TOTAL -eq 0 ]; then
+        echo "⚠ 백업 로그가 없습니다."
+        return
     fi
 
-    # START와 END 매칭 (END < START인 경우, END 재조정)
-    valid_starts=()
-    valid_ends=()
-
-    end_idx=0
-    for s in "${STARTS[@]}"; do
-        while [ $end_idx -lt ${#ENDS[@]} ] && [ "${ENDS[$end_idx]}" -lt "$s" ]; do
-            ((end_idx++))
-        done
-        if [ $end_idx -lt ${#ENDS[@]} ]; then
-            valid_starts+=("$s")
-            valid_ends+=("${ENDS[$end_idx]}")
-            ((end_idx++))
-        fi
-    done
-
-    COUNT=${#valid_starts[@]}
-
-    if [ $COUNT -eq 0 ]; then
-        echo "⚠ 정상이었던 백업 기록이 없습니다."
-        exit 0
-    fi
-
-    echo "총 $COUNT개의 정상 백업 중 최근 5개를 출력합니다."
+    echo "총 $TOTAL개의 백업 중 최근 5개 요약:"
     echo ""
 
-    # 최근 5개만 출력
-    for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
-        S=${valid_starts[$i]}
-        E=${valid_ends[$i]}
+    COUNT=0
+    for ((i = TOTAL - 1; i >= 0 && COUNT < 5; i--)); do
 
-        echo "===== #$((i+1)) 번째 백업 기록 ====="
-        sed -n "${S},${E}p" "$LOG_FILE"
-        echo ""
+        S=${START_LINES[$i]}
+        E=${END_LINES[$i]}
+        DATE=${START_DATETIMES[$i]}
+
+        # 성공/실패 여부 판별
+        if sed -n "${S},${E}p" "$LOG_FILE" | grep -q "Push 성공"; then
+            STATUS="성공"
+        elif sed -n "${S},${E}p" "$LOG_FILE" | grep -q "변경 사항 없음"; then
+            STATUS="없음"
+        else
+            STATUS="실패"
+        fi
+
+        # 변경 파일 수 추출
+        CHANGES=$(sed -n "${S},${E}p" "$LOG_FILE" | grep "files changed" | head -n1 | awk '{print $2}')
+        if [ -z "$CHANGES" ]; then
+            CHANGES="-"
+        fi
+
+        echo "#$((i+1)) | $DATE | $STATUS | $CHANGES files changed"
+
+        COUNT=$((COUNT + 1))
     done
+
+    echo ""
 }
 
 
