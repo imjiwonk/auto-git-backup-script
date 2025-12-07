@@ -1,6 +1,6 @@
 #!/bin/bash
 cd /home/kimji/auto-backup
-
+LOG_FILE="logs/backup.log"
 # ===============================
 #  Slack 알림 함수 (환경 변수 사용)
 # ===============================
@@ -24,68 +24,61 @@ notify_slack() {
 #  최근 백업 로그 출력 기능
 # ===============================
 show_recent() {
-
-
     if [[ ! -f "$LOG_FILE" ]]; then
-        echo -e "${RED}[ERROR] 로그 파일이 없습니다: $LOG_FILE${RESET}"
+        echo -e "[ERROR] 로그 파일이 없습니다: $LOG_FILE"
         exit 1
     fi
 
-    echo -e "📌 최근 백업 로그 5개"
+    echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    # 전체 백업 횟수 계산
-    TOTAL_COUNT=$(grep -c "AUTO BACKUP START" "$LOG_FILE")
-    echo -e "총 $TOTAL_COUNT개의 백업 중 최근 5개 요약:\n"
+    # 전체 START 라인 번호 배열 가져오기
+    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
 
-    # 최근 5개의 시작 지점을 찾음
-    mapfile -t START_LINES < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}' | tail -n 5)
+    TOTAL=${#STARTS[@]}
+    if [[ $TOTAL -eq 0 ]]; then
+        echo "백업 기록이 없습니다."
+        exit 0
+    fi
 
-    INDEX=0
-    for START in "${START_LINES[@]}"; do
-        ((INDEX++))
+    # 최근 5개의 인덱스만 사용
+    START_INDEX=$((TOTAL > 5 ? TOTAL - 5 : 0))
 
-        # 다음 블록의 시작까지 범위를 지정
-        NEXT_START=$(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: -v s="$START" '$1 > s {print $1; exit}')
+    for ((i=START_INDEX; i<TOTAL; i++)); do
+        START_LINE=${STARTS[$i]}
 
-        if [[ -z "$NEXT_START" ]]; then
+        # END_LINE 계산 (마지막 블록인지 확인)
+        if (( i == TOTAL - 1 )); then
             END_LINE=$(wc -l < "$LOG_FILE")
         else
-            END_LINE=$((NEXT_START - 1))
+            END_LINE=$(( STARTS[$i+1] - 1 ))
         fi
 
-        # 블록 추출
-        BLOCK=$(sed -n "${START},${END_LINE}p" "$LOG_FILE")
+        # sed로 블록 추출
+        BLOCK=$(sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE")
 
-        # 날짜 추출 "[YYYY-MM-DD HH:MM:SS]"
-        DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | sed 's/\[//;s/\]//')
+        # 날짜 추출
+        DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | tr -d '[]')
 
         # 상태 판별
         if echo "$BLOCK" | grep -q "Push 성공"; then
             STATUS="성공"
         elif echo "$BLOCK" | grep -q "변경 사항 없음"; then
             STATUS="없음"
-        elif echo "$BLOCK" | grep -q "Push 실패"; then
-            STATUS="실패"
         else
             STATUS="실패"
         fi
 
-        # 변경 파일 수 탐지
-        CHANGE_LINE=$(echo "$BLOCK" | grep "files changed" | head -n 1)
-        if [[ -n "$CHANGE_LINE" ]]; then
-            CHANGED=$(echo "$CHANGE_LINE" | grep -o "[0-9]\+ files changed")
-        else
-            CHANGED="-"
-        fi
+        # 변경 파일 수
+        CHANGED=$(echo "$BLOCK" | grep "files changed" | grep -o "[0-9]\+ files changed")
+        [[ -z "$CHANGED" ]] && CHANGED="-"
 
-        # 출력 (한 줄)
-        echo "#$((TOTAL_COUNT - (5 - INDEX))) | [${DATE}] | ${STATUS} | ${CHANGED}"
+        # 출력 번호는 총 개수 기준
+        BLOCK_NUM=$(( i + 1 ))
+
+        echo "#$BLOCK_NUM | [$DATE] | $STATUS | $CHANGED"
     done
-
-    echo ""
 }
-
 
 
 # -------------------------------
@@ -108,7 +101,6 @@ for DIR in "${REQUIRED_DIRS[@]}"; do
     fi
 done
 
-LOG_FILE="logs/backup.log"
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
 echo "[$TIMESTAMP] ==== AUTO BACKUP START ====" >> "$LOG_FILE"
