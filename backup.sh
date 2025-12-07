@@ -1,166 +1,146 @@
 #!/bin/bash
+cd /home/kimji/auto-backup
 
-# ================================================
-# 자동 백업 시스템 (Git + Slack + Cron 안정 버전)
-# ================================================
+# ===============================
+#  Slack 알림 함수 (환경 변수 사용)
+# ===============================
+WEBHOOK_URL="$SLACK_WEBHOOK_URL"
 
-BASE="/home/kimji/auto-backup"
+notify_slack() {
+    MESSAGE="$1"
 
-SOURCE_DIR="$BASE/source"
-BACKUP_DIR="$BASE/backup"
-LOG_DIR="$BASE/logs"
-REPORT_DIR="$BASE/reports"
-
-LOGFILE="$LOG_DIR/backup.log"
-LOCKFILE="/tmp/auto_backup.lock"
-
-mkdir -p "$SOURCE_DIR" "$BACKUP_DIR" "$LOG_DIR" "$REPORT_DIR"
-
-
-# -------------------------------------------------
-# Slack Webhook URL
-# -------------------------------------------------
-if [ -z "$SLACK_WEBHOOK_URL" ]; then
-    SLACK_WEBHOOK_URL="https://hooks.slack.com/services/본인_URL"
-fi
-
-
-# -------------------------------------------------
-# 중복 실행 방지
-# -------------------------------------------------
-if [ -e "$LOCKFILE" ]; then
-    echo "[WARN] 이미 실행 중입니다."
-    exit 1
-fi
-touch "$LOCKFILE"
-
-cleanup() {
-    rm -f "$LOCKFILE"
-}
-trap cleanup EXIT
-
-
-# -------------------------------------------------
-# 로그 출력 함수
-# -------------------------------------------------
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOGFILE"
-}
-
-
-# -------------------------------------------------
-# Slack 성공 메시지
-# -------------------------------------------------
-notify_slack_success() {
-    TIME="$1"
-    FILES="$2"
-    REPORT="$3"
-
-    curl -X POST -H "Content-Type: application/json" \
-    --data "{
-        \"text\": \"✅ 자동 백업 성공! 시간: $TIME\n변경된 파일:\n$FILES\n보고서: $REPORT\"
-    }" \
-    "$SLACK_WEBHOOK_URL" > /dev/null 2>&1
-}
-
-
-# -------------------------------------------------
-# 🔧 Git 저장소 자동 초기화 & 동기화
-# -------------------------------------------------
-ensure_git_repo() {
-    cd "$BACKUP_DIR"
-
-    # .git 폴더 없으면 생성
-    if [ ! -d ".git" ]; then
-        log "Git 저장소가 없어 새로 초기화합니다."
-        git init
-        git branch -m main
-        git remote add origin https://github.com/imjiwonk/auto-git-backup-script.git
-    fi
-
-    # 원격 저장소 존재 확인
-    if git ls-remote origin &> /dev/null; then
-        log "원격 저장소 연결 OK"
-    else
-        log "원격 저장소 오류! origin을 다시 설정합니다."
-        git remote remove origin
-        git remote add origin https://github.com/imjiwonk/auto-git-backup-script.git
-    fi
-
-    # 원격 브랜치 가져오기 (충돌나도 자동 병합)
-    git pull origin main --allow-unrelated-histories --no-edit 2>/dev/null
-}
-
-
-# -------------------------------------------------
-# 1️⃣ 백업 실행 함수
-# -------------------------------------------------
-run_backup() {
-    log "==== AUTO BACKUP START ===="
-
-    ensure_git_repo
-
-    # rsync로 source → backup 복사
-    CHANGED_TEXT=$(rsync -av --itemize-changes --delete "$SOURCE_DIR/" "$BACKUP_DIR/" 2>&1)
-
-    REPORT_FILE="$REPORT_DIR/backup_$(date '+%Y-%m-%d_%H-%M-%S').txt"
-    echo "$CHANGED_TEXT" > "$REPORT_FILE"
-
-    if [ $? -ne 0 ]; then
-        log "백업 실패"
-        log "==== AUTO BACKUP END ===="
+    if [ -z "$WEBHOOK_URL" ]; then
+        echo "[INFO] SLACK_WEBHOOK_URL 없음 → Slack 알림 생략"
         return
     fi
 
-    log "백업 진행: 성공"
+    curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\": \"$MESSAGE\"}" \
+        "$WEBHOOK_URL" > /dev/null 2>&1
+}
 
-    # 변경된 파일 목록 생성
-    FILES=$(echo "$CHANGED_TEXT" | grep -E "^[*>c]" | sed 's/^/ - /')
+# ===============================
+#  최근 백업 로그 출력 기능
+# ===============================
+show_recent() {
+    echo "📌 최근 백업 로그 5개"
+    echo "----------------------------------"
 
-    cd "$BACKUP_DIR"
+    LOG_FILE="logs/backup.log"
 
-    # Git 커밋 및 push
-    if [ -n "$(git status --porcelain)" ]; then
-        git add .
-        git commit -m "Auto Backup: $(date '+%Y-%m-%d %H:%M:%S')"
+    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
 
-        # push 실패하면 자동 pull 후 재시도
-        if ! git push origin main; then
-            log "push 실패 → 자동 pull 후 재시도"
-            git pull origin main --allow-unrelated-histories --no-edit
-            git push origin main
-        fi
-
-        log "GitHub 업로드 완료"
-    else
-        log "변경사항 없음 → GitHub 업로드 생략"
+    if [ ${#STARTS[@]} -eq 0 ]; then
+        echo "⚠ 기록된 백업 로그가 없습니다."
+        exit 0
     fi
 
-    notify_slack_success "$(date '+%Y-%m-%d %H:%M:%S')" "$FILES" "$REPORT_FILE"
-    log "==== AUTO BACKUP END ===="
+    COUNT=${#STARTS[@]}
+    echo "총 $COUNT개의 백업 중 최근 5개를 출력합니다."
+    echo ""
+
+    for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
+        S=${STARTS[$i]}
+        E=${ENDS[$i]}
+
+        echo "===== #$((i+1)) 번째 백업 기록 ====="
+        sed -n "${S},${E}p" "$LOG_FILE"
+        echo ""
+    done
 }
 
+# -------------------------------
+# 명령어 처리
+# -------------------------------
+if [ "$1" = "recent" ]; then
+    show_recent
+    exit 0
+fi
 
-# -------------------------------------------------
-# 최근 로그 보기
-# -------------------------------------------------
-show_recent() {
-    echo "📌 최근 로그:"
-    tail -n 50 "$LOGFILE"
-}
+# ===============================
+# 필수 폴더 자동 생성
+# ===============================
+REQUIRED_DIRS=("logs" "reports" "scripts" "notes")
 
+for DIR in "${REQUIRED_DIRS[@]}"; do
+    if [ ! -d "$DIR" ]; then
+        mkdir -p "$DIR"
+        echo "[INFO] 폴더 생성: $DIR"
+    fi
+done
 
-# -------------------------------------------------
-# 실행 모드
-# -------------------------------------------------
-case "$1" in
-    "run") run_backup ;;
-    "recent") show_recent ;;
-    *) 
-        echo "사용법:"
-        echo "  ./backup.sh run     → 즉시 백업 실행"
-        echo "  ./backup.sh recent  → 최근 로그 출력"
-        ;;
-esac
+LOG_FILE="logs/backup.log"
+TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
-exit 0
+echo "[$TIMESTAMP] ==== AUTO BACKUP START ====" >> "$LOG_FILE"
+
+# ===============================
+#  Git 변경사항 확인
+# ===============================
+STATUS=$(git status --porcelain)
+
+if [ -z "$STATUS" ]; then
+    echo "[$TIMESTAMP] 변경 사항 없음. 백업 종료." | tee -a "$LOG_FILE"
+    exit 0
+fi
+
+# ===============================
+#  변경 로그 생성
+# ===============================
+REPORT_PATH=$(./generate_report.sh)
+echo "변경 로그 생성 완료 → $REPORT_PATH"
+
+# ===============================
+#  변경 파일 목록 Slack용 포맷
+# ===============================
+CHANGED_FILES=$(git status --porcelain | awk '{print $2}')
+
+FILE_LIST=""
+while read -r FILE; do
+    FILE_LIST="$FILE_LIST\n- $FILE"
+done <<< "$CHANGED_FILES"
+
+# ===============================
+#  Commit 처리
+# ===============================
+git add .
+git commit -m "Auto Backup : $TIMESTAMP" >> "$LOG_FILE" 2>&1
+
+if [ $? -ne 0 ]; then
+    echo "[$TIMESTAMP] Commit 실패" | tee -a "$LOG_FILE"
+    notify_slack "❌ 자동 백업 실패 — Commit 오류 발생"
+    exit 1
+fi
+
+echo "[$TIMESTAMP] Commit 완료" >> "$LOG_FILE"
+
+# ===============================
+#  Pull (충돌 대비)
+# ===============================
+git pull --rebase >> "$LOG_FILE" 2>&1
+if [ $? -ne 0 ]; then
+    echo "[$TIMESTAMP] Pull 충돌 — stash 적용" | tee -a "$LOG_FILE"
+    git stash >> "$LOG_FILE"
+    git pull --rebase >> "$LOG_FILE"
+    git stash pop >> "$LOG_FILE"
+fi
+
+# ===============================
+#  Push
+# ===============================
+git push >> "$LOG_FILE" 2>&1
+
+if [ $? -eq 0 ]; then
+    echo "[$TIMESTAMP] Push 성공" | tee -a "$LOG_FILE"
+    notify_slack "✅ *자동 백업 성공!*
+📅 시간: $TIMESTAMP
+📄 변경된 파일 목록:$FILE_LIST
+📘 보고서: $REPORT_PATH"
+else
+    echo "[$TIMESTAMP] Push 실패" | tee -a "$LOG_FILE"
+    notify_slack "❌ 자동 백업 실패 (Push 오류)"
+fi
+
+echo "[$TIMESTAMP] ==== AUTO BACKUP END ====" >> "$LOG_FILE"
+echo ""
