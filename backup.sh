@@ -28,27 +28,52 @@ show_recent() {
 
     LOG_FILE="logs/backup.log"
 
+    # START, END 라인 번호 읽기
     mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END" "$LOG_FILE"   | awk -F: '{print $1}')
 
-    if [ ${#STARTS[@]} -eq 0 ]; then
+    if [ ${#STARTS[@]} -eq 0 ] || [ ${#ENDS[@]} -eq 0 ]; then
         echo "⚠ 기록된 백업 로그가 없습니다."
         exit 0
     fi
 
-    COUNT=${#STARTS[@]}
-    echo "총 $COUNT개의 백업 중 최근 5개를 출력합니다."
+    # START와 END 매칭 (END < START인 경우, END 재조정)
+    valid_starts=()
+    valid_ends=()
+
+    end_idx=0
+    for s in "${STARTS[@]}"; do
+        while [ $end_idx -lt ${#ENDS[@]} ] && [ "${ENDS[$end_idx]}" -lt "$s" ]; do
+            ((end_idx++))
+        done
+        if [ $end_idx -lt ${#ENDS[@]} ]; then
+            valid_starts+=("$s")
+            valid_ends+=("${ENDS[$end_idx]}")
+            ((end_idx++))
+        fi
+    done
+
+    COUNT=${#valid_starts[@]}
+
+    if [ $COUNT -eq 0 ]; then
+        echo "⚠ 정상이었던 백업 기록이 없습니다."
+        exit 0
+    fi
+
+    echo "총 $COUNT개의 정상 백업 중 최근 5개를 출력합니다."
     echo ""
 
+    # 최근 5개만 출력
     for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
-        S=${STARTS[$i]}
-        E=${ENDS[$i]}
+        S=${valid_starts[$i]}
+        E=${valid_ends[$i]}
 
         echo "===== #$((i+1)) 번째 백업 기록 ====="
         sed -n "${S},${E}p" "$LOG_FILE"
         echo ""
     done
 }
+
 
 # -------------------------------
 # 명령어 처리
