@@ -1,6 +1,6 @@
 #!/bin/bash
 cd /home/kimji/auto-backup
-LOG_FILE="logs/backup.log"
+
 # ===============================
 #  Slack 알림 함수 (환경 변수 사용)
 # ===============================
@@ -23,44 +23,46 @@ notify_slack() {
 # ===============================
 #  최근 백업 로그 출력 기능
 # ===============================
+LOG_FILE="/home/kimji/auto-backup/logs/backup.log"
+   # ← 이 줄이 show_recent 위에 반드시 있어야 함
+
 show_recent() {
     if [[ ! -f "$LOG_FILE" ]]; then
-        echo -e "[ERROR] 로그 파일이 없습니다: $LOG_FILE"
+        echo "[ERROR] 로그 파일이 없습니다: $LOG_FILE"
         exit 1
     fi
 
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    # 전체 START 라인 번호 배열 가져오기
+    # START 라인 번호 수집
     mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
 
     TOTAL=${#STARTS[@]}
-    if [[ $TOTAL -eq 0 ]]; then
+    if (( TOTAL == 0 )); then
         echo "백업 기록이 없습니다."
         exit 0
     fi
 
-    # 최근 5개의 인덱스만 사용
-    START_INDEX=$((TOTAL > 5 ? TOTAL - 5 : 0))
+    START_INDEX=$(( TOTAL > 5 ? TOTAL - 5 : 0 ))
 
-    for ((i=START_INDEX; i<TOTAL; i++)); do
+    for (( i=START_INDEX; i<TOTAL; i++ )); do
         START_LINE=${STARTS[$i]}
 
-        # END_LINE 계산 (마지막 블록인지 확인)
+        # END_LINE 계산
         if (( i == TOTAL - 1 )); then
             END_LINE=$(wc -l < "$LOG_FILE")
         else
             END_LINE=$(( STARTS[$i+1] - 1 ))
         fi
 
-        # sed로 블록 추출
+        # 블록 읽기
         BLOCK=$(sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE")
 
-        # 날짜 추출
+        # 날짜
         DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | tr -d '[]')
 
-        # 상태 판별
+        # 상태
         if echo "$BLOCK" | grep -q "Push 성공"; then
             STATUS="성공"
         elif echo "$BLOCK" | grep -q "변경 사항 없음"; then
@@ -70,15 +72,18 @@ show_recent() {
         fi
 
         # 변경 파일 수
-        CHANGED=$(echo "$BLOCK" | grep "files changed" | grep -o "[0-9]\+ files changed")
-        [[ -z "$CHANGED" ]] && CHANGED="-"
+        CHANGE=$(echo "$BLOCK" | grep "files changed" | grep -o "[0-9]\+ files changed")
+        [[ -z "$CHANGE" ]] && CHANGE="-"
 
-        # 출력 번호는 총 개수 기준
+        # 백업 번호 = 로그 개수 기준
         BLOCK_NUM=$(( i + 1 ))
 
-        echo "#$BLOCK_NUM | [$DATE] | $STATUS | $CHANGED"
+        echo "#$BLOCK_NUM | [$DATE] | $STATUS | $CHANGE"
     done
+
+    echo ""
 }
+
 
 
 # -------------------------------
