@@ -97,9 +97,9 @@ show_recent() {
 
     LOG_FILE="logs/backup.log"
 
-    # START / END 라인 번호(정확한 파일 라인번호)
-    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END"   "$LOG_FILE" | awk -F: '{print $1}')
+    # 파일의 실제 줄 번호 그대로 배열 저장
+    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | cut -d: -f1)
+    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END"   "$LOG_FILE" | cut -d: -f1)
 
     TOTAL=${#ENDS[@]}
 
@@ -111,26 +111,29 @@ show_recent() {
     echo "총 $TOTAL개의 정상 종료된 백업 중 최근 5개:"
     echo ""
 
+    # 최근 5개만 출력
     START_INDEX=$((TOTAL > 5 ? TOTAL - 5 : 0))
 
     for ((i = START_INDEX; i < TOTAL; i++)); do
         END_LINE=${ENDS[$i]}
 
-        # END_LINE보다 작은 START 중 가장 마지막 START 찾기 (파일 라인 번호 기준)
-        START_LINE=$(awk -v end="$END_LINE" '
-            $0 ~ /AUTO BACKUP START/ {
-                if (NR < end) last = NR
-            }
-            END { print last }
-        ' "$LOG_FILE")
+        # END_LINE 바로 이전의 START_LINE 찾기 (파일 라인번호 기준)
+        START_LINE=""
+        for s in "${STARTS[@]}"; do
+            if (( s < END_LINE )); then
+                START_LINE=$s
+            else
+                break
+            fi
+        done
 
-        # START가 없으면 건너뛰기
+        # START_LINE 없으면 잘못된 로그 → 건너뜀
         if [ -z "$START_LINE" ]; then
             echo "#$((i+1)) | [시간 없음] | 실패 | -"
             continue
         fi
 
-        # sed를 안전하게 실행
+        # sed로 블록 추출 — 여기서 오류가 나면 range mismatched
         BLOCK=$(sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE")
 
         # 날짜 추출
@@ -153,6 +156,7 @@ show_recent() {
         echo "#$((i+1)) | [$DATE] | $STATUS | $CHANGE"
     done
 }
+
 
 
 
