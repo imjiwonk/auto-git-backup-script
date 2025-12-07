@@ -5,7 +5,8 @@ cd /home/kimji/auto-backup
 #  Slack 알림 함수 (환경 변수 사용)
 # ===============================
 WEBHOOK_URL="$SLACK_WEBHOOK_URL"
-CRON_LOG="$HOME/auto-backup/cron.log"
+CRON_LOG="/home/kimji/auto-backup/cron.log"
+
 notify_slack() {
     MESSAGE="$1"
 
@@ -23,7 +24,6 @@ notify_slack() {
 #  최근 백업 로그 출력 기능
 # ===============================
 show_recent() {
-    CRON_LOG="$HOME/auto-backup/cron.log"
 
 
     if [[ ! -f "$LOG_FILE" ]]; then
