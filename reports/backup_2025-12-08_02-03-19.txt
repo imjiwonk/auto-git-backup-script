@@ -1,0 +1,5 @@
+sending incremental file list
+>f.st...... test3.txt
+
+sent 220 bytes  received 35 bytes  510.00 bytes/sec
+total size is 133  speedup is 0.52

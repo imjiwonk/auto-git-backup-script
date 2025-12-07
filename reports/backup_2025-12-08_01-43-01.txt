@@ -1,0 +1,50 @@
+sending incremental file list
+*deleting   .git/refs/tags/
+*deleting   .git/refs/heads/main
+*deleting   .git/refs/heads/
+*deleting   .git/refs/
+*deleting   .git/objects/pack/
+*deleting   .git/objects/info/
+*deleting   .git/objects/e9/766b8d961f8561e8f928bd2fd005fe7f684297
+*deleting   .git/objects/e9/
+*deleting   .git/objects/89/d8a64af547e8272132eae98c4edf158eb5ddb5
+*deleting   .git/objects/89/
+*deleting   .git/objects/61/9d8253277ab1278ebde0b444a232befc1e188c
+*deleting   .git/objects/61/
+*deleting   .git/objects/06/0207da3a646f809e668d43428c19e8c69dd059
+*deleting   .git/objects/06/
+*deleting   .git/objects/
+*deleting   .git/logs/refs/heads/main
+*deleting   .git/logs/refs/heads/
+*deleting   .git/logs/refs/
+*deleting   .git/logs/HEAD
+*deleting   .git/logs/
+*deleting   .git/info/exclude
+*deleting   .git/info/
+*deleting   .git/hooks/update.sample
+*deleting   .git/hooks/sendemail-validate.sample
+*deleting   .git/hooks/push-to-checkout.sample
+*deleting   .git/hooks/prepare-commit-msg.sample
+*deleting   .git/hooks/pre-receive.sample
+*deleting   .git/hooks/pre-rebase.sample
+*deleting   .git/hooks/pre-push.sample
+*deleting   .git/hooks/pre-merge-commit.sample
+*deleting   .git/hooks/pre-commit.sample
+*deleting   .git/hooks/pre-applypatch.sample
+*deleting   .git/hooks/post-update.sample
+*deleting   .git/hooks/fsmonitor-watchman.sample
+*deleting   .git/hooks/commit-msg.sample
+*deleting   .git/hooks/applypatch-msg.sample
+*deleting   .git/hooks/
+*deleting   .git/branches/
+*deleting   .git/index
+*deleting   .git/description
+*deleting   .git/config
+*deleting   .git/HEAD
+*deleting   .git/COMMIT_EDITMSG
+*deleting   .git/
+.d..t...... ./
+>f.st...... test1.txt
+
+sent 204 bytes  received 1,243 bytes  2,894.00 bytes/sec
+total size is 91  speedup is 0.06
