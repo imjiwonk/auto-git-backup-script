@@ -25,44 +25,58 @@ notify_slack() {
 show_recent() {
     LOG_FILE="logs/backup.log"
 
-    if [[ ! -f "$LOG_FILE" ]]; then
-        echo "[ERROR] 로그 파일이 없습니다: $LOG_FILE"
-        exit 1
-    fi
-
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    # START 라인 번호 수집
+    # START, END 라인 배열
     mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END" "$LOG_FILE"   | awk -F: '{print $1}')
 
-    TOTAL=${#STARTS[@]}
-    if (( TOTAL == 0 )); then
-        echo "⚠ 백업 기록이 없습니다."
-        exit 0
+    if [ ${#STARTS[@]} -eq 0 ]; then
+        echo "⚠ 로그가 없습니다."
+        return
     fi
 
-    START_INDEX=$(( TOTAL > 5 ? TOTAL - 5 : 0 ))
-    CURRENT_NUMBER=$(( START_INDEX + 1 ))
+    # ⭐ 페어링된 블록만 저장할 배열
+    PAIRED_STARTS=()
+    PAIRED_ENDS=()
 
-    for (( i=START_INDEX; i<TOTAL; i++ )); do
-        START_LINE=${STARTS[$i]}
+    si=0
+    ei=0
 
-        # END_LINE 계산
-        if (( i == TOTAL - 1 )); then
-            END_LINE=$(wc -l < "$LOG_FILE")
+    # START와 END를 순서대로 매칭
+    while [ $si -lt ${#STARTS[@]} ] && [ $ei -lt ${#ENDS[@]} ]; do
+        if [ "${ENDS[$ei]}" -gt "${STARTS[$si]}" ]; then
+            # 매칭됨
+            PAIRED_STARTS+=("${STARTS[$si]}")
+            PAIRED_ENDS+=("${ENDS[$ei]}")
+            ((si++))
+            ((ei++))
         else
-            END_LINE=$(( STARTS[$i+1] - 1 ))
+            ((ei++))
         fi
+    done
 
-        # sed 오류 방지: 숫자가 아닐 경우 continue
-        if ! [[ "$START_LINE" =~ ^[0-9]+$ ]] || ! [[ "$END_LINE" =~ ^[0-9]+$ ]]; then
-            continue
-        fi
+    TOTAL=${#PAIRED_STARTS[@]}
 
-        BLOCK=$(sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE")
+    if [ $TOTAL -eq 0 ]; then
+        echo "⚠ 매칭된 백업 기록이 없습니다. (END 없는 START가 많음)"
+        return
+    fi
 
-        DATE=$(echo "$BLOCK" | grep -o "\[[0-9:\- ]\+\]" | head -n 1 | tr -d '[]')
+    echo "총 $TOTAL개의 정상적인 백업 중 최근 5개:"
+    echo ""
+
+    # 최근 5개만
+    START_INDEX=$(( TOTAL > 5 ? TOTAL - 5 : 0 ))
+
+    for ((i = START_INDEX; i < TOTAL; i++)); do
+        S=${PAIRED_STARTS[$i]}
+        E=${PAIRED_ENDS[$i]}
+
+        BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
+
+        DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | tr -d '[]')
 
         if echo "$BLOCK" | grep -q "Push 성공"; then
             STATUS="성공"
@@ -72,12 +86,10 @@ show_recent() {
             STATUS="실패"
         fi
 
-        CHANGE=$(echo "$BLOCK" | grep -o "[0-9]\+ files changed")
+        CHANGE=$(echo "$BLOCK" | grep "files changed" | grep -o "[0-9]\+ files changed")
         [[ -z "$CHANGE" ]] && CHANGE="-"
 
-        echo "#$CURRENT_NUMBER | [$DATE] | $STATUS | $CHANGE"
-
-        ((CURRENT_NUMBER++))
+        echo "#$((i+1)) | [$DATE] | $STATUS | $CHANGE"
     done
 
     echo ""
