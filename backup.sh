@@ -5,7 +5,6 @@ cd /home/kimji/auto-backup
 #  Slack 알림 함수 (환경 변수 사용)
 # ===============================
 WEBHOOK_URL="$SLACK_WEBHOOK_URL"
-CRON_LOG="/home/kimji/auto-backup/cron.log"
 
 notify_slack() {
     MESSAGE="$1"
@@ -23,68 +22,33 @@ notify_slack() {
 # ===============================
 #  최근 백업 로그 출력 기능
 # ===============================
-LOG_FILE="/home/kimji/auto-backup/logs/backup.log"
-   # ← 이 줄이 show_recent 위에 반드시 있어야 함
-
 show_recent() {
-    if [[ ! -f "$LOG_FILE" ]]; then
-        echo "[ERROR] 로그 파일이 없습니다: $LOG_FILE"
-        exit 1
-    fi
-
     echo "📌 최근 백업 로그 5개"
     echo "----------------------------------"
 
-    # START 라인 번호 수집
-    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    LOG_FILE="logs/backup.log"
 
-    TOTAL=${#STARTS[@]}
-    if (( TOTAL == 0 )); then
-        echo "백업 기록이 없습니다."
+    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
+    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
+
+    if [ ${#STARTS[@]} -eq 0 ]; then
+        echo "⚠ 기록된 백업 로그가 없습니다."
         exit 0
     fi
 
-    START_INDEX=$(( TOTAL > 5 ? TOTAL - 5 : 0 ))
-
-    for (( i=START_INDEX; i<TOTAL; i++ )); do
-        START_LINE=${STARTS[$i]}
-
-        # END_LINE 계산
-        if (( i == TOTAL - 1 )); then
-            END_LINE=$(wc -l < "$LOG_FILE")
-        else
-            END_LINE=$(( STARTS[$i+1] - 1 ))
-        fi
-
-        # 블록 읽기
-        BLOCK=$(sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE")
-
-        # 날짜
-        DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | tr -d '[]')
-
-        # 상태
-        if echo "$BLOCK" | grep -q "Push 성공"; then
-            STATUS="성공"
-        elif echo "$BLOCK" | grep -q "변경 사항 없음"; then
-            STATUS="없음"
-        else
-            STATUS="실패"
-        fi
-
-        # 변경 파일 수
-        CHANGE=$(echo "$BLOCK" | grep "files changed" | grep -o "[0-9]\+ files changed")
-        [[ -z "$CHANGE" ]] && CHANGE="-"
-
-        # 백업 번호 = 로그 개수 기준
-        BLOCK_NUM=$(( i + 1 ))
-
-        echo "#$BLOCK_NUM | [$DATE] | $STATUS | $CHANGE"
-    done
-
+    COUNT=${#STARTS[@]}
+    echo "총 $COUNT개의 백업 중 최근 5개를 출력합니다."
     echo ""
+
+    for ((i = COUNT - 1; i >= COUNT - 5 && i >= 0; i--)); do
+        S=${STARTS[$i]}
+        E=${ENDS[$i]}
+
+        echo "===== #$((i+1)) 번째 백업 기록 ====="
+        sed -n "${S},${E}p" "$LOG_FILE"
+        echo ""
+    done
 }
-
-
 
 # -------------------------------
 # 명령어 처리
@@ -106,6 +70,7 @@ for DIR in "${REQUIRED_DIRS[@]}"; do
     fi
 done
 
+LOG_FILE="logs/backup.log"
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
 echo "[$TIMESTAMP] ==== AUTO BACKUP START ====" >> "$LOG_FILE"
