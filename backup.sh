@@ -5,7 +5,7 @@ cd /home/kimji/auto-backup
 #  Slack 알림 함수 (환경 변수 사용)
 # ===============================
 WEBHOOK_URL="$SLACK_WEBHOOK_URL"
-
+CRON_LOG="$HOME/auto-backup/cron.log"
 notify_slack() {
     MESSAGE="$1"
 
@@ -23,58 +23,64 @@ notify_slack() {
 #  최근 백업 로그 출력 기능
 # ===============================
 show_recent() {
-    LOG_FILE="logs/backup.log"
+    CRON_LOG="$HOME/auto-backup/cron.log"
 
-    echo "📌 최근 백업 로그 5개"
-    echo "----------------------------------"
 
-    # START / END 라인 번호 불러오기
-    mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS < <(grep -n "AUTO BACKUP END" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t DATETIMES < <(grep "AUTO BACKUP START" "$LOG_FILE" | awk '{print $1, $2}')
-
-    TOTAL=${#STARTS[@]}
-
-    if [ $TOTAL -eq 0 ]; then
-        echo "⚠ 백업 로그가 없습니다."
-        return
+    if [[ ! -f "$LOG_FILE" ]]; then
+        echo -e "${RED}[ERROR] 로그 파일이 없습니다: $LOG_FILE${RESET}"
+        exit 1
     fi
 
-    echo "총 $TOTAL개의 백업 중 최근 5개 요약:"
-    echo ""
+    echo -e "📌 최근 백업 로그 5개"
+    echo "----------------------------------"
 
-    COUNT=0
-    for ((i = TOTAL - 1; i >= 0 && COUNT < 5; i--)); do
+    # 전체 백업 횟수 계산
+    TOTAL_COUNT=$(grep -c "AUTO BACKUP START" "$LOG_FILE")
+    echo -e "총 $TOTAL_COUNT개의 백업 중 최근 5개 요약:\n"
 
-        S=${STARTS[$i]}
-        E=${ENDS[$i]}
-        DATE=${DATETIMES[$i]}
+    # 최근 5개의 시작 지점을 찾음
+    mapfile -t START_LINES < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}' | tail -n 5)
 
-        # END가 없으면 START와 동일하게 설정
-        if [ -z "$E" ]; then
-            E=$S
+    INDEX=0
+    for START in "${START_LINES[@]}"; do
+        ((INDEX++))
+
+        # 다음 블록의 시작까지 범위를 지정
+        NEXT_START=$(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: -v s="$START" '$1 > s {print $1; exit}')
+
+        if [[ -z "$NEXT_START" ]]; then
+            END_LINE=$(wc -l < "$LOG_FILE")
+        else
+            END_LINE=$((NEXT_START - 1))
         fi
 
-        BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
+        # 블록 추출
+        BLOCK=$(sed -n "${START},${END_LINE}p" "$LOG_FILE")
+
+        # 날짜 추출 "[YYYY-MM-DD HH:MM:SS]"
+        DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | sed 's/\[//;s/\]//')
 
         # 상태 판별
         if echo "$BLOCK" | grep -q "Push 성공"; then
             STATUS="성공"
         elif echo "$BLOCK" | grep -q "변경 사항 없음"; then
             STATUS="없음"
+        elif echo "$BLOCK" | grep -q "Push 실패"; then
+            STATUS="실패"
         else
             STATUS="실패"
         fi
 
-        # 변경 파일 수
-        CHANGES=$(echo "$BLOCK" | grep "files changed" | head -n1 | awk '{print $2}')
-        if [ -z "$CHANGES" ]; then
-            CHANGES="-"
+        # 변경 파일 수 탐지
+        CHANGE_LINE=$(echo "$BLOCK" | grep "files changed" | head -n 1)
+        if [[ -n "$CHANGE_LINE" ]]; then
+            CHANGED=$(echo "$CHANGE_LINE" | grep -o "[0-9]\+ files changed")
+        else
+            CHANGED="-"
         fi
 
-        echo "#$((i+1)) | [$DATE] | $STATUS | $CHANGES files changed"
-
-        COUNT=$((COUNT + 1))
+        # 출력 (한 줄)
+        echo "#$((TOTAL_COUNT - (5 - INDEX))) | [${DATE}] | ${STATUS} | ${CHANGED}"
     done
 
     echo ""
