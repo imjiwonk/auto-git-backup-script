@@ -97,37 +97,47 @@ show_recent() {
 
     LOG_FILE="logs/backup.log"
 
-    # START / END 라인 번호 읽기
+    # START / END 라인 번호(정확한 파일 라인번호)
     mapfile -t STARTS < <(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: '{print $1}')
-    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END" "$LOG_FILE"   | awk -F: '{print $1}')
+    mapfile -t ENDS   < <(grep -n "AUTO BACKUP END"   "$LOG_FILE" | awk -F: '{print $1}')
 
-    # END 기준으로 안정적인 백업 개수를 정함
     TOTAL=${#ENDS[@]}
 
     if [ $TOTAL -eq 0 ]; then
-        echo "⚠ 정상적으로 종료된 백업 기록이 없습니다."
+        echo "⚠ 정상 종료된 백업 기록이 없습니다."
         exit 0
     fi
 
     echo "총 $TOTAL개의 정상 종료된 백업 중 최근 5개:"
     echo ""
 
-    # 최근 5개만 선택
     START_INDEX=$((TOTAL > 5 ? TOTAL - 5 : 0))
 
     for ((i = START_INDEX; i < TOTAL; i++)); do
-        E=${ENDS[$i]}
+        END_LINE=${ENDS[$i]}
 
-        # END 라인보다 바로 앞의 START 라인을 찾음
-        S=$(grep -n "AUTO BACKUP START" "$LOG_FILE" | awk -F: -v end="$E" '$1 < end {last=$1} END{print last}')
+        # END_LINE보다 작은 START 중 가장 마지막 START 찾기 (파일 라인 번호 기준)
+        START_LINE=$(awk -v end="$END_LINE" '
+            $0 ~ /AUTO BACKUP START/ {
+                if (NR < end) last = NR
+            }
+            END { print last }
+        ' "$LOG_FILE")
 
-        # sed 출력
-        BLOCK=$(sed -n "${S},${E}p" "$LOG_FILE")
+        # START가 없으면 건너뛰기
+        if [ -z "$START_LINE" ]; then
+            echo "#$((i+1)) | [시간 없음] | 실패 | -"
+            continue
+        fi
 
-        # 시간 추출
+        # sed를 안전하게 실행
+        BLOCK=$(sed -n "${START_LINE},${END_LINE}p" "$LOG_FILE")
+
+        # 날짜 추출
         DATE=$(echo "$BLOCK" | grep -o "\[[0-9\-: ]\+\]" | head -n 1 | tr -d '[]')
+        [[ -z "$DATE" ]] && DATE="시간 없음"
 
-        # 상태
+        # 상태 추출
         if echo "$BLOCK" | grep -q "Push 성공"; then
             STATUS="성공"
         elif echo "$BLOCK" | grep -q "변경 사항 없음"; then
@@ -136,13 +146,15 @@ show_recent() {
             STATUS="실패"
         fi
 
-        # 변경 파일 개수
-        CHANGE=$(echo "$BLOCK" | grep "files changed" | grep -o "[0-9]\+ files changed")
+        # 변경 파일 수
+        CHANGE=$(echo "$BLOCK" | grep -o "[0-9]\+ files changed" | head -n 1)
         [[ -z "$CHANGE" ]] && CHANGE="-"
 
         echo "#$((i+1)) | [$DATE] | $STATUS | $CHANGE"
     done
 }
+
+
 
 
 # -------------------------------
